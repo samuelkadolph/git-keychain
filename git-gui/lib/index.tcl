@@ -115,7 +115,7 @@ proc write_update_indexinfo {fd pathList totalCnt batch after} {
 		set info [lindex $s 2]
 		if {$info eq {}} continue
 
-		puts -nonewline $fd "$info\t[encoding convertto $path]\0"
+		puts -nonewline $fd "$info\t[encoding convertto utf-8 $path]\0"
 		display_file $path $new
 	}
 
@@ -186,7 +186,7 @@ proc write_update_index {fd pathList totalCnt batch after} {
 		?M {set new M_}
 		?? {continue}
 		}
-		puts -nonewline $fd "[encoding convertto $path]\0"
+		puts -nonewline $fd "[encoding convertto utf-8 $path]\0"
 		display_file $path $new
 	}
 
@@ -247,7 +247,7 @@ proc write_checkout_index {fd pathList totalCnt batch after} {
 		?M -
 		?T -
 		?D {
-			puts -nonewline $fd "[encoding convertto $path]\0"
+			puts -nonewline $fd "[encoding convertto utf-8 $path]\0"
 			display_file $path ?_
 		}
 		}
@@ -291,7 +291,7 @@ proc do_unstage_selection {} {
 
 	if {[array size selected_paths] > 0} {
 		unstage_helper \
-			{Unstaging selected files from commit} \
+			[mc "Unstaging selected files from commit"] \
 			[array names selected_paths]
 	} elseif {$current_diff_path ne {}} {
 		unstage_helper \
@@ -343,7 +343,7 @@ proc do_add_selection {} {
 
 	if {[array size selected_paths] > 0} {
 		add_helper \
-			{Adding selected files} \
+			[mc "Adding selected files"] \
 			[array names selected_paths]
 	} elseif {$current_diff_path ne {}} {
 		add_helper \
@@ -356,15 +356,36 @@ proc do_add_all {} {
 	global file_states
 
 	set paths [list]
+	set untracked_paths [list]
 	foreach path [array names file_states] {
 		switch -glob -- [lindex $file_states($path) 0] {
 		U? {continue}
 		?M -
 		?T -
 		?D {lappend paths $path}
+		?O {lappend untracked_paths $path}
 		}
 	}
-	add_helper {Adding all changed files} $paths
+	if {[llength $untracked_paths]} {
+		set reply 0
+		switch -- [get_config gui.stageuntracked] {
+		no {
+			set reply 0
+		}
+		yes {
+			set reply 1
+		}
+		ask -
+		default {
+			set reply [ask_popup [mc "Stage %d untracked files?" \
+									  [llength $untracked_paths]]]
+		}
+		}
+		if {$reply} {
+			set paths [concat $paths $untracked_paths]
+		}
+	}
+	add_helper [mc "Adding all changed files"] $paths
 }
 
 proc revert_helper {txt paths} {
@@ -393,7 +414,7 @@ proc revert_helper {txt paths} {
 	# such distinction is needed in some languages. Previously, the
 	# code used "Revert changes in" for both, but that can't work
 	# in languages where 'in' must be combined with word from
-	# rest of string (in diffrent way for both cases of course).
+	# rest of string (in different way for both cases of course).
 	#
 	# FIXME: Unfortunately, even that isn't enough in some languages
 	# as they have quite complex plural-form rules. Unfortunately,

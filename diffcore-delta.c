@@ -48,15 +48,16 @@ struct spanhash_top {
 
 static struct spanhash_top *spanhash_rehash(struct spanhash_top *orig)
 {
-	struct spanhash_top *new;
+	struct spanhash_top *new_spanhash;
 	int i;
 	int osz = 1 << orig->alloc_log2;
 	int sz = osz << 1;
 
-	new = xmalloc(sizeof(*orig) + sizeof(struct spanhash) * sz);
-	new->alloc_log2 = orig->alloc_log2 + 1;
-	new->free = INITIAL_FREE(new->alloc_log2);
-	memset(new->data, 0, sizeof(struct spanhash) * sz);
+	new_spanhash = xmalloc(st_add(sizeof(*orig),
+			     st_mult(sizeof(struct spanhash), sz)));
+	new_spanhash->alloc_log2 = orig->alloc_log2 + 1;
+	new_spanhash->free = INITIAL_FREE(new_spanhash->alloc_log2);
+	memset(new_spanhash->data, 0, sizeof(struct spanhash) * sz);
 	for (i = 0; i < osz; i++) {
 		struct spanhash *o = &(orig->data[i]);
 		int bucket;
@@ -64,11 +65,11 @@ static struct spanhash_top *spanhash_rehash(struct spanhash_top *orig)
 			continue;
 		bucket = o->hashval & (sz - 1);
 		while (1) {
-			struct spanhash *h = &(new->data[bucket++]);
+			struct spanhash *h = &(new_spanhash->data[bucket++]);
 			if (!h->cnt) {
 				h->hashval = o->hashval;
 				h->cnt = o->cnt;
-				new->free--;
+				new_spanhash->free--;
 				break;
 			}
 			if (sz <= bucket)
@@ -76,7 +77,7 @@ static struct spanhash_top *spanhash_rehash(struct spanhash_top *orig)
 		}
 	}
 	free(orig);
-	return new;
+	return new_spanhash;
 }
 
 static struct spanhash_top *add_spanhash(struct spanhash_top *top,
@@ -130,7 +131,8 @@ static struct spanhash_top *hash_chars(struct diff_filespec *one)
 	int is_text = !diff_filespec_is_binary(one);
 
 	i = INITIAL_HASH_SIZE;
-	hash = xmalloc(sizeof(*hash) + sizeof(struct spanhash) * (1<<i));
+	hash = xmalloc(st_add(sizeof(*hash),
+			      st_mult(sizeof(struct spanhash), 1<<i)));
 	hash->alloc_log2 = i;
 	hash->free = INITIAL_FREE(i);
 	memset(hash->data, 0, sizeof(struct spanhash) * (1<<i));
@@ -156,10 +158,7 @@ static struct spanhash_top *hash_chars(struct diff_filespec *one)
 		n = 0;
 		accum1 = accum2 = 0;
 	}
-	qsort(hash->data,
-		1ul << hash->alloc_log2,
-		sizeof(hash->data[0]),
-		spanhash_cmp);
+	QSORT(hash->data, 1ul << hash->alloc_log2, spanhash_cmp);
 	return hash;
 }
 
@@ -167,7 +166,6 @@ int diffcore_count_changes(struct diff_filespec *src,
 			   struct diff_filespec *dst,
 			   void **src_count_p,
 			   void **dst_count_p,
-			   unsigned long delta_limit,
 			   unsigned long *src_copied,
 			   unsigned long *literal_added)
 {

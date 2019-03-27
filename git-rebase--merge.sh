@@ -1,9 +1,9 @@
-#!/bin/sh
+# This shell script fragment is sourced by git-rebase to implement
+# its merge-based non-interactive mode that copes well with renamed
+# files.
 #
 # Copyright (c) 2010 Junio C Hamano.
 #
-
-. git-sh-setup
 
 prec=4
 
@@ -24,10 +24,11 @@ continue_merge () {
 		die "$resolvemsg"
 	fi
 
-	cmt=`cat "$state_dir/current"`
+	cmt=$(cat "$state_dir/current")
 	if ! git diff-index --quiet --ignore-submodules HEAD --
 	then
-		if ! git commit --no-verify -C "$cmt"
+		if ! git commit ${gpg_sign_opt:+"$gpg_sign_opt"} $signoff $allow_empty_message \
+			--no-verify -C "$cmt"
 		then
 			echo "Commit failed, please do not call \"git commit\""
 			echo "directly, but instead do one of the following: "
@@ -53,11 +54,13 @@ continue_merge () {
 }
 
 call_merge () {
-	cmt="$(cat "$state_dir/cmt.$1")"
+	msgnum="$1"
+	echo "$msgnum" >"$state_dir/msgnum"
+	cmt="$(cat "$state_dir/cmt.$msgnum")"
 	echo "$cmt" > "$state_dir/current"
+	git update-ref REBASE_HEAD "$cmt"
 	hd=$(git rev-parse --verify HEAD)
 	cmt_name=$(git symbolic-ref HEAD 2> /dev/null || echo HEAD)
-	msgnum=$(cat "$state_dir/msgnum")
 	eval GITHEAD_$cmt='"${cmt_name##refs/heads/}~$(($end - $msgnum))"'
 	eval GITHEAD_$hd='$onto_name'
 	export GITHEAD_$cmt GITHEAD_$hd
@@ -66,7 +69,9 @@ call_merge () {
 		GIT_MERGE_VERBOSITY=1 && export GIT_MERGE_VERBOSITY
 	fi
 	test -z "$strategy" && strategy=recursive
-	eval 'git-merge-$strategy' $strategy_opts '"$cmt^" -- "$hd" "$cmt"'
+	# If cmt doesn't have a parent, don't include it as a base
+	base=$(git rev-parse --verify --quiet $cmt^)
+	eval 'git-merge-$strategy' $strategy_opts $base ' -- "$hd" "$cmt"'
 	rv=$?
 	case "$rv" in
 	0)
@@ -90,14 +95,16 @@ call_merge () {
 
 finish_rb_merge () {
 	move_to_original_branch
-	git notes copy --for-rewrite=rebase < "$state_dir"/rewritten
-	if test -x "$GIT_DIR"/hooks/post-rewrite &&
-		test -s "$state_dir"/rewritten; then
-		"$GIT_DIR"/hooks/post-rewrite rebase < "$state_dir"/rewritten
+	if test -s "$state_dir"/rewritten
+	then
+		git notes copy --for-rewrite=rebase <"$state_dir"/rewritten
+		hook="$(git rev-parse --git-path hooks/post-rewrite)"
+		test -x "$hook" && "$hook" rebase <"$state_dir"/rewritten
 	fi
-	rm -r "$state_dir"
 	say All done.
 }
+
+git_rebase__merge () {
 
 case "$action" in
 continue)
@@ -109,7 +116,7 @@ continue)
 		continue_merge
 	done
 	finish_rb_merge
-	exit
+	return
 	;;
 skip)
 	read_state
@@ -121,16 +128,20 @@ skip)
 		continue_merge
 	done
 	finish_rb_merge
-	exit
+	return
+	;;
+show-current-patch)
+	exec git show REBASE_HEAD --
 	;;
 esac
 
 mkdir -p "$state_dir"
 echo "$onto_name" > "$state_dir/onto_name"
 write_basic_state
+rm -f "$(git rev-parse --git-path REBASE_HEAD)"
 
 msgnum=0
-for cmt in `git rev-list --reverse --no-merges "$revisions"`
+for cmt in $(git rev-list --reverse --no-merges "$revisions")
 do
 	msgnum=$(($msgnum + 1))
 	echo "$cmt" > "$state_dir/cmt.$msgnum"
@@ -149,3 +160,5 @@ do
 done
 
 finish_rb_merge
+
+}

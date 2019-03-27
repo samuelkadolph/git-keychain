@@ -24,7 +24,7 @@ test_expect_success 'interactive rebase --continue works with touched file' '
 	git checkout master &&
 
 	FAKE_LINES="edit 1" git rebase -i HEAD^ &&
-	test-chmtime =-60 F1 &&
+	test-tool chmtime =-60 F1 &&
 	git rebase --continue
 '
 
@@ -36,7 +36,7 @@ test_expect_success 'non-interactive rebase --continue works with touched file' 
 	test_must_fail git rebase --onto master master topic &&
 	echo "Resolved" >F2 &&
 	git add F2 &&
-	test-chmtime =-60 F1 &&
+	test-tool chmtime =-60 F1 &&
 	git rebase --continue
 '
 
@@ -51,7 +51,7 @@ test_expect_success 'rebase --continue remembers merge strategy and options' '
 	test_commit "commit-new-file-F3-on-topic-branch" F3 32 &&
 	test_when_finished "rm -fr test-bin funny.was.run" &&
 	mkdir test-bin &&
-	cat >test-bin/git-merge-funny <<-EOF
+	cat >test-bin/git-merge-funny <<-EOF &&
 	#!$SHELL_PATH
 	case "\$1" in --opt) ;; *) exit 2 ;; esac
 	shift &&
@@ -74,25 +74,89 @@ test_expect_success 'rebase --continue remembers merge strategy and options' '
 	test -f funny.was.run
 '
 
-test_expect_success 'rebase --continue remembers --rerere-autoupdate' '
+test_expect_success 'rebase passes merge strategy options correctly' '
 	rm -fr .git/rebase-* &&
 	git reset --hard commit-new-file-F3-on-topic-branch &&
-	git checkout master
+	test_commit theirs-to-merge &&
+	git reset --hard HEAD^ &&
+	test_commit some-commit &&
+	test_tick &&
+	git merge --no-ff theirs-to-merge &&
+	FAKE_LINES="1 edit 2 3" git rebase -i -f -p -m \
+		-s recursive --strategy-option=theirs HEAD~2 &&
+	test_commit force-change &&
+	git rebase --continue
+'
+
+test_expect_success 'setup rerere database' '
+	rm -fr .git/rebase-* &&
+	git reset --hard commit-new-file-F3-on-topic-branch &&
+	git checkout master &&
 	test_commit "commit-new-file-F3" F3 3 &&
-	git config rerere.enabled true &&
+	test_config rerere.enabled true &&
 	test_must_fail git rebase -m master topic &&
 	echo "Resolved" >F2 &&
+	cp F2 expected-F2 &&
 	git add F2 &&
 	test_must_fail git rebase --continue &&
 	echo "Resolved" >F3 &&
+	cp F3 expected-F3 &&
 	git add F3 &&
 	git rebase --continue &&
-	git reset --hard topic@{1} &&
-	test_must_fail git rebase -m --rerere-autoupdate master &&
-	test "$(cat F2)" = "Resolved" &&
-	test_must_fail git rebase --continue &&
-	test "$(cat F3)" = "Resolved" &&
-	git rebase --continue
+	git reset --hard topic@{1}
 '
+
+prepare () {
+	rm -fr .git/rebase-* &&
+	git reset --hard commit-new-file-F3-on-topic-branch &&
+	git checkout master &&
+	test_config rerere.enabled true
+}
+
+test_rerere_autoupdate () {
+	action=$1 &&
+	test_expect_success "rebase $action --continue remembers --rerere-autoupdate" '
+		prepare &&
+		test_must_fail git rebase $action --rerere-autoupdate master topic &&
+		test_cmp expected-F2 F2 &&
+		git diff-files --quiet &&
+		test_must_fail git rebase --continue &&
+		test_cmp expected-F3 F3 &&
+		git diff-files --quiet &&
+		git rebase --continue
+	'
+
+	test_expect_success "rebase $action --continue honors rerere.autoUpdate" '
+		prepare &&
+		test_config rerere.autoupdate true &&
+		test_must_fail git rebase $action master topic &&
+		test_cmp expected-F2 F2 &&
+		git diff-files --quiet &&
+		test_must_fail git rebase --continue &&
+		test_cmp expected-F3 F3 &&
+		git diff-files --quiet &&
+		git rebase --continue
+	'
+
+	test_expect_success "rebase $action --continue remembers --no-rerere-autoupdate" '
+		prepare &&
+		test_config rerere.autoupdate true &&
+		test_must_fail git rebase $action --no-rerere-autoupdate master topic &&
+		test_cmp expected-F2 F2 &&
+		test_must_fail git diff-files --quiet &&
+		git add F2 &&
+		test_must_fail git rebase --continue &&
+		test_cmp expected-F3 F3 &&
+		test_must_fail git diff-files --quiet &&
+		git add F3 &&
+		git rebase --continue
+	'
+}
+
+test_rerere_autoupdate
+test_rerere_autoupdate -m
+GIT_SEQUENCE_EDITOR=: && export GIT_SEQUENCE_EDITOR
+test_rerere_autoupdate -i
+test_rerere_autoupdate --preserve-merges
 
 test_done

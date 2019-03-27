@@ -124,7 +124,7 @@ test_expect_success 'checkout -b to @{-1} fails with the right branch name' '
 	git checkout branch2 &&
 	echo  >expect "fatal: A branch named '\''branch1'\'' already exists." &&
 	test_must_fail git checkout -b @{-1} 2>actual &&
-	test_cmp expect actual
+	test_i18ncmp expect actual
 '
 
 test_expect_success 'checkout -B to an existing branch resets branch to HEAD' '
@@ -189,12 +189,13 @@ test_expect_success 'checkout -b <describe>' '
 	test_cmp expect actual
 '
 
-test_expect_success 'checkout -B to the current branch fails before merging' '
+test_expect_success 'checkout -B to the current branch works' '
 	git checkout branch1 &&
+	git checkout -B branch1-scratch &&
+
 	setup_dirty_mergeable &&
-	git commit -mfooble &&
-	test_must_fail git checkout -B branch1 initial &&
-	test_must_fail test_dirty_mergeable
+	git checkout -B branch1-scratch initial &&
+	test_dirty_mergeable
 '
 
 test_done

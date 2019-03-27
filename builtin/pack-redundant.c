@@ -7,11 +7,14 @@
 */
 
 #include "builtin.h"
+#include "repository.h"
+#include "packfile.h"
+#include "object-store.h"
 
 #define BLKSIZE 512
 
 static const char pack_redundant_usage[] =
-"git pack-redundant [ --verbose ] [ --alt-odb ] < --all | <.pack filename> ...>";
+"git pack-redundant [--verbose] [--alt-odb] (--all | <filename.pack>...)";
 
 static int load_all_packs, verbose, alt_odb;
 
@@ -47,17 +50,17 @@ static inline void llist_item_put(struct llist_item *item)
 
 static inline struct llist_item *llist_item_get(void)
 {
-	struct llist_item *new;
+	struct llist_item *new_item;
 	if ( free_nodes ) {
-		new = free_nodes;
+		new_item = free_nodes;
 		free_nodes = free_nodes->next;
 	} else {
 		int i = 1;
-		new = xmalloc(sizeof(struct llist_item) * BLKSIZE);
+		ALLOC_ARRAY(new_item, BLKSIZE);
 		for (; i < BLKSIZE; i++)
-			llist_item_put(&new[i]);
+			llist_item_put(&new_item[i]);
 	}
-	return new;
+	return new_item;
 }
 
 static void llist_free(struct llist *list)
@@ -79,26 +82,26 @@ static inline void llist_init(struct llist **list)
 static struct llist * llist_copy(struct llist *list)
 {
 	struct llist *ret;
-	struct llist_item *new, *old, *prev;
+	struct llist_item *new_item, *old_item, *prev;
 
 	llist_init(&ret);
 
 	if ((ret->size = list->size) == 0)
 		return ret;
 
-	new = ret->front = llist_item_get();
-	new->sha1 = list->front->sha1;
+	new_item = ret->front = llist_item_get();
+	new_item->sha1 = list->front->sha1;
 
-	old = list->front->next;
-	while (old) {
-		prev = new;
-		new = llist_item_get();
-		prev->next = new;
-		new->sha1 = old->sha1;
-		old = old->next;
+	old_item = list->front->next;
+	while (old_item) {
+		prev = new_item;
+		new_item = llist_item_get();
+		prev->next = new_item;
+		new_item->sha1 = old_item->sha1;
+		old_item = old_item->next;
 	}
-	new->next = NULL;
-	ret->back = new;
+	new_item->next = NULL;
+	ret->back = new_item;
 
 	return ret;
 }
@@ -107,24 +110,24 @@ static inline struct llist_item *llist_insert(struct llist *list,
 					      struct llist_item *after,
 					       const unsigned char *sha1)
 {
-	struct llist_item *new = llist_item_get();
-	new->sha1 = sha1;
-	new->next = NULL;
+	struct llist_item *new_item = llist_item_get();
+	new_item->sha1 = sha1;
+	new_item->next = NULL;
 
 	if (after != NULL) {
-		new->next = after->next;
-		after->next = new;
+		new_item->next = after->next;
+		after->next = new_item;
 		if (after == list->back)
-			list->back = new;
+			list->back = new_item;
 	} else {/* insert in front */
 		if (list->size == 0)
-			list->back = new;
+			list->back = new_item;
 		else
-			new->next = list->front;
-		list->front = new;
+			new_item->next = list->front;
+		list->front = new_item;
 	}
 	list->size++;
-	return new;
+	return new_item;
 }
 
 static inline struct llist_item *llist_insert_back(struct llist *list,
@@ -301,14 +304,14 @@ static void pll_free(struct pll *l)
  */
 static struct pll * get_permutations(struct pack_list *list, int n)
 {
-	struct pll *subset, *ret = NULL, *new_pll = NULL, *pll;
+	struct pll *subset, *ret = NULL, *new_pll = NULL;
 
 	if (list == NULL || pack_list_size(list) < n || n == 0)
 		return NULL;
 
 	if (n == 1) {
 		while (list) {
-			new_pll = xmalloc(sizeof(pll));
+			new_pll = xmalloc(sizeof(*new_pll));
 			new_pll->pl = NULL;
 			pack_list_insert(&new_pll->pl, list);
 			new_pll->next = ret;
@@ -321,7 +324,7 @@ static struct pll * get_permutations(struct pack_list *list, int n)
 	while (list->next) {
 		subset = get_permutations(list->next, n - 1);
 		while (subset) {
-			new_pll = xmalloc(sizeof(pll));
+			new_pll = xmalloc(sizeof(*new_pll));
 			new_pll->pl = subset->pl;
 			pack_list_insert(&new_pll->pl, list);
 			new_pll->next = ret;
@@ -442,6 +445,7 @@ static void minimize(struct pack_list **min)
 	/* return if there are no objects missing from the unique set */
 	if (missing->size == 0) {
 		*min = unique;
+		free(missing);
 		return;
 	}
 
@@ -569,7 +573,7 @@ static struct pack_list * add_pack(struct packed_git *p)
 
 static struct pack_list * add_pack_file(const char *filename)
 {
-	struct packed_git *p = packed_git;
+	struct packed_git *p = get_packed_git(the_repository);
 
 	if (strlen(filename) < 40)
 		die("Bad pack filename: %s", filename);
@@ -584,7 +588,7 @@ static struct pack_list * add_pack_file(const char *filename)
 
 static void load_all(void)
 {
-	struct packed_git *p = packed_git;
+	struct packed_git *p = get_packed_git(the_repository);
 
 	while (p) {
 		add_pack(p);
@@ -626,8 +630,6 @@ int cmd_pack_redundant(int argc, const char **argv, const char *prefix)
 		else
 			break;
 	}
-
-	prepare_packed_git();
 
 	if (load_all_packs)
 		load_all();

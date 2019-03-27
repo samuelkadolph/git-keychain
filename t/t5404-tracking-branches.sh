@@ -36,7 +36,7 @@ test_expect_success 'prepare pushable branches' '
 '
 
 test_expect_success 'mixed-success push returns error' '
-	test_must_fail git push
+	test_must_fail git push origin :
 '
 
 test_expect_success 'check tracking branches updated correctly after push' '
@@ -56,7 +56,7 @@ test_expect_success 'deleted branches have their tracking branches removed' '
 test_expect_success 'already deleted tracking branches ignored' '
 	git branch -d -r origin/b3 &&
 	git push origin :b3 >output 2>&1 &&
-	! grep error output
+	! grep "^error: " output
 '
 
 test_done
